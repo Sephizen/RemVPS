@@ -1,29 +1,24 @@
 #!/bin/bash
 
-# Clear screen
 clear
 
 # ==========================================
-# Colors (using tput for better compatibility)
+# Hard-coded ANSI colors (most reliable)
 # ==========================================
-if [ -t 1 ]; then
-    RED=$(tput setaf 1)
-    GREEN=$(tput setaf 2)
-    YELLOW=$(tput setaf 3)
-    BLUE=$(tput setaf 4)
-    PURPLE=$(tput setaf 5)
-    CYAN=$(tput setaf 6)
-    WHITE=$(tput setaf 7)
-    BOLD=$(tput bold)
-    NC=$(tput sgr0)
-else
-    RED="" GREEN="" YELLOW="" BLUE="" PURPLE="" CYAN="" WHITE="" BOLD="" NC=""
-fi
+R=$'\033[0;31m'      # Red
+G=$'\033[0;32m'      # Green
+Y=$'\033[1;33m'      # Yellow
+B=$'\033[0;34m'      # Blue
+P=$'\033[0;35m'      # Purple
+C=$'\033[0;36m'      # Cyan
+W=$'\033[1;37m'      # White
+BOLD=$'\033[1m'
+N=$'\033[0m'         # Reset
 
 # Typing effect
 type_effect() {
     local text="$1"
-    local delay="${2:-0.01}"
+    local delay="${2:-0.012}"
     for ((i=0; i<${#text}; i++)); do
         printf "%s" "${text:$i:1}"
         sleep "$delay"
@@ -34,15 +29,15 @@ type_effect() {
 # Loading bar
 loading_bar() {
     local title="$1"
-    printf "${YELLOW}⏳ %s ${NC}[          ]" "$title"
-    sleep 0.25
-    printf "\r${YELLOW}⏳ %s ${NC}[===       ]" "$title"
-    sleep 0.25
-    printf "\r${YELLOW}⏳ %s ${NC}[======    ]" "$title"
-    sleep 0.25
-    printf "\r${YELLOW}⏳ %s ${NC}[========= ]" "$title"
-    sleep 0.25
-    printf "\r${YELLOW}⏳ %s ${NC}[==========] \( {GREEN}DONE! \){NC}\n" "$title"
+    printf "${Y}⏳ %s ${N}[          ]" "$title"
+    sleep 0.2
+    printf "\r${Y}⏳ %s ${N}[===       ]" "$title"
+    sleep 0.2
+    printf "\r${Y}⏳ %s ${N}[======    ]" "$title"
+    sleep 0.2
+    printf "\r${Y}⏳ %s ${N}[========= ]" "$title"
+    sleep 0.2
+    printf "\r${Y}⏳ %s ${N}[==========] \( {G}DONE! \){N}\n" "$title"
 }
 
 # Sudo check
@@ -58,18 +53,222 @@ fi
 show_menu() {
     clear
     echo
-    echo -e "\( {CYAN} \){BOLD}"
+    printf "\( {C} \){BOLD}"
     cat << 'EOF'
-          ╔══════════════════════════════╗
-          ║                              ║
-          ║           RemVPS             ║
-          ║                              ║
-          ╚══════════════════════════════╝
+        ╔════════════════════════════╗
+        ║                            ║
+        ║          RemVPS            ║
+        ║                            ║
+        ╚════════════════════════════╝
 EOF
-    echo -e "${NC}"
-    echo -e "\( {CYAN}──────────────────────────────────────── \){NC}"
+    printf "${N}"
     echo
-    echo -e "  \( {YELLOW}Select an option: \){NC}"
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    echo
+    printf "  \( {Y}Select an option: \){N}\n"
+    echo
+    printf "  \( {C}[1] \){N}  Create & Boot New Instance\n"
+    printf "  \( {C}[2] \){N}  Restart Existing Instance\n"
+    printf "  \( {C}[3] \){N}  Modify TCP Port Rules\n"
+    printf "  \( {C}[4] \){N}  Clean Cache & Reset\n"
+    printf "  \( {C}[5] \){N}  Exit\n"
+    echo
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    printf "  ${W}➤ Enter choice [1-5]: ${N}"
+    read -r CHOICE
+
+    case $CHOICE in
+        1) create_vps ;;
+        2) restart_vps ;;
+        3) configure_tcp ;;
+        4) clean_vps ;;
+        5) printf "\n\( {G}  Goodbye from RemVPS. \){N}\n\n"; exit 0 ;;
+        *) printf "\( {R}  ❌ Invalid choice. Please select 1-5. \){N}\n"; sleep 1.5; show_menu ;;
+    esac
+}
+
+# Create VPS
+create_vps() {
+    clear
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    printf "\( {W} \){BOLD}  Configure Virtual Machine${N}\n"
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    echo
+
+    printf "${B}  ➤ RAM Size in GB (e.g. 4, 8, 16): ${N}"
+    read -r RAM_GB
+    printf "${B}  ➤ CPU Cores (e.g. 2, 4, 8): ${N}"
+    read -r CPU_CORES
+    printf "${B}  ➤ Disk Space to ADD in GB: ${N}"
+    read -r DISK_ADD
+    printf "${B}  ➤ Username (default: ubuntu): ${N}"
+    read -r USER_NAME
+    USER_NAME=${USER_NAME:-ubuntu}
+    printf "${B}  ➤ Password (default: 1234): ${N}"
+    read -r USER_PASS
+    USER_PASS=${USER_PASS:-1234}
+
+    TCP_HOST_PORT=${TCP_HOST_PORT:-2222}
+    TCP_GUEST_PORT=22
+
+    echo
+    printf "\( {Y}  Installing core dependencies... \){N}\n"
+    echo
+
+    $SUDO_CMD apt-get update -y > /dev/null 2>&1
+    $SUDO_CMD apt-get install -y qemu-system-x86 qemu-utils wget cloud-image-utils curl > /dev/null 2>&1
+
+    $SUDO_CMD mkdir -p /home/daytona > /dev/null 2>&1
+
+    if [ ! -f "/home/daytona/ubuntu22.qcow2" ]; then
+        printf "\( {Y}  📥 Downloading Ubuntu 22.04 Cloud Image... \){N}\n"
+        $SUDO_CMD wget -q --show-progress https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O /home/daytona/ubuntu22.qcow2
+        $SUDO_CMD chmod 666 /home/daytona/ubuntu22.qcow2
+    else
+        printf "\( {G}  ✅ Existing Ubuntu image found. \){N}\n"
+    fi
+
+    loading_bar "Generating Cloud-Init seed"
+    cat > user-data <<EOF
+#cloud-config
+ssh_pwauth: True
+chpasswd:
+  list: |
+    \( {USER_NAME}: \){USER_PASS}
+  expire: False
+EOF
+
+    cloud-localds seed.img user-data > /dev/null 2>&1
+    loading_bar "Expanding virtual disk"
+    \( SUDO_CMD qemu-img resize /home/daytona/ubuntu22.qcow2 + \){DISK_ADD}G > /dev/null 2>&1
+
+    save_env
+    boot_qemu
+}
+
+# Configure TCP
+configure_tcp() {
+    clear
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    printf "\( {W} \){BOLD}  TCP Port Forwarding Rules${N}\n"
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    echo
+
+    if [ -f ".vps_env" ]; then
+        # shellcheck source=/dev/null
+        source .vps_env
+    fi
+
+    printf "  Current Host Port  : \( {C}%s \){N}\n" "${TCP_HOST_PORT:-2222}"
+    printf "  Current Guest Port : \( {C}%s \){N}\n" "${TCP_GUEST_PORT:-22}"
+    echo
+    printf "${B}  ➤ New Host Port (default: 2222): ${N}"
+    read -r NEW_HOST_PORT
+    TCP_HOST_PORT=${NEW_HOST_PORT:-2222}
+
+    printf "${B}  ➤ Guest Port (default: 22): ${N}"
+    read -r NEW_GUEST_PORT
+    TCP_GUEST_PORT=${NEW_GUEST_PORT:-22}
+
+    save_env
+    echo
+    printf "\( {G}  ✅ Port rules updated successfully. \){N}\n"
+    sleep 1.8
+    show_menu
+}
+
+save_env() {
+    cat > .vps_env <<EOF
+RAM_GB=${RAM_GB:-4}
+CPU_CORES=${CPU_CORES:-2}
+USER_NAME=${USER_NAME:-ubuntu}
+USER_PASS=${USER_PASS:-1234}
+TCP_HOST_PORT=${TCP_HOST_PORT:-2222}
+TCP_GUEST_PORT=${TCP_GUEST_PORT:-22}
+EOF
+}
+
+# Boot
+boot_qemu() {
+    if [ -f ".vps_env" ]; then
+        # shellcheck source=/dev/null
+        source .vps_env
+    fi
+
+    TCP_HOST_PORT=${TCP_HOST_PORT:-2222}
+    TCP_GUEST_PORT=${TCP_GUEST_PORT:-22}
+    RAM_VALUE="${RAM_GB:-4}G"
+
+    clear
+    printf "\( {G}──────────────────────────────────── \){N}\n"
+    type_effect "  System ready. Starting network..." 0.012
+    printf "\( {G}──────────────────────────────────── \){N}\n"
+    echo
+
+    sshx_log=$(mktemp)
+    curl -sSf https://sshx.io/get | sh -s run > "$sshx_log" 2>&1 &
+    sleep 5
+    SSHX_URL=$(grep -o 'https://sshx.io/s/[a-zA-Z0-9]*' "$sshx_log" | head -n 1)
+    rm -f "$sshx_log"
+
+    clear
+    printf "\( {G}──────────────────────────────────── \){N}\n"
+    printf "\( {W} \){BOLD}       RemVPS  •  Instance Active${N}\n"
+    printf "\( {G}──────────────────────────────────── \){N}\n"
+    echo
+    printf "  \( {W}Username  : \){N}  \( {C}%s \){N}\n" "${USER_NAME:-ubuntu}"
+    printf "  \( {W}Password  : \){N}  \( {C}%s \){N}\n" "${USER_PASS:-1234}"
+    printf "  \( {W}Resources : \){N}  \( {C}%s RAM  |  %s Cores \){N}\n" "\( RAM_VALUE" " \){CPU_CORES:-2}"
+    printf "  \( {W}Port Rule : \){N}  \( {Y}Host %s → Guest %s \){N}\n" "$TCP_HOST_PORT" "$TCP_GUEST_PORT"
+    echo
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    if [ -n "$SSHX_URL" ]; then
+        printf "  \( {Y}Live Access Link: \){N}\n"
+        printf "  \( {G}%s \){N}\n" "$SSHX_URL"
+    else
+        printf "  \( {R}Tunnel still loading. Local port is ready. \){N}\n"
+    fi
+    printf "\( {C}──────────────────────────────────── \){N}\n"
+    printf "  \( {W}Connect: \){N}  ssh %s@localhost -p %s\n" "${USER_NAME:-ubuntu}" "$TCP_HOST_PORT"
+    printf "\( {G}──────────────────────────────────── \){N}\n"
+    echo
+
+    qemu-system-x86_64 \
+        -hda /home/daytona/ubuntu22.qcow2 \
+        -m "$RAM_VALUE" \
+        -smp "${CPU_CORES:-2}" \
+        -drive file=seed.img,format=raw \
+        -nographic \
+        -netdev user,id=net0,hostfwd=tcp::\( {TCP_HOST_PORT}-: \){TCP_GUEST_PORT} \
+        -device e1000,netdev=net0
+}
+
+# Restart
+restart_vps() {
+    if [ -f "/home/daytona/ubuntu22.qcow2" ] && [ -f "seed.img" ]; then
+        printf "\( {G}  🔄 Restarting existing instance... \){N}\n"
+        sleep 1
+        boot_qemu
+    else
+        printf "\( {R}  ❌ No existing configuration found. Use option 1 first. \){N}\n"
+        sleep 2.5
+        show_menu
+    fi
+}
+
+# Clean
+clean_vps() {
+    printf "\( {R}  ⚠️  Removing all cache files and configuration... \){N}\n"
+    $SUDO_CMD rm -rf user-data seed.img /home/daytona/ubuntu22.qcow2 .vps_env
+    pkill -f sshx > /dev/null 2>&1 || true
+    sleep 1
+    printf "\( {G}  ✅ Workspace cleaned successfully. \){N}\n"
+    sleep 1.8
+    show_menu
+}
+
+# Start
+show_menu    echo -e "  \( {YELLOW}Select an option: \){NC}"
     echo
     echo -e "  \( {CYAN}[1] \){NC}  Create & Boot New Instance"
     echo -e "  \( {CYAN}[2] \){NC}  Restart Existing Instance"
